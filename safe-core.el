@@ -218,10 +218,11 @@
       (overlay-put safe-current-item-overlay 'face '((t)))
 
       (dolist (result safe-result-list)
-        (when (or (null safe-current-extension)
-                  (safe-current-extension-p (car result) safe-extension-alist)
-                  (safe-current-extension-p (car result) safe-autoload-extension-alist))
-          (insert (propertize (car result) 'face '(:foreground "#cc7700")) "\n")
+        (when (and (not (safe--result-empty-p (cdr result)))
+                   (or (null safe-current-extension)
+                       (safe-current-extension-p (car result) safe-extension-alist)
+                       (safe-current-extension-p (car result) safe-autoload-extension-alist)))
+          (insert (propertize (car result) 'face '(:foreground "#CC7700")) "\n")
           (mapc #'(lambda (r)
                     (insert (format "\t%s\t%s\n"
                                     (safe--get-icon (car result) r)
@@ -369,6 +370,12 @@ If CONS is t, it'll get the earliest cons' index."
             safe-update-result t))
     input))
 
+(defun safe--result-empty-p (result)
+  "Check if the result is empty."
+  (when (or (equal result '(nil))
+            (null result))
+    t))
+
 (defun safe-result-exists-p (result)
   "Check if RESULT is exists."
   (let (re)
@@ -418,7 +425,7 @@ Keywords:
        (when ,prefix
          (add-to-list 'safe-prefix-alist (cons ,prefix ',extension)))
        (unless (safe-result-exists-p ,name)
-         (add-to-list 'safe-result-list (list ,name "null") t))
+         (add-to-list 'safe-result-list (list ,name) t))
        (if ,auto
            (add-to-list 'safe-autoload-extension-alist (cons ',extension ,name))
          (add-to-list 'safe-extension-alist (cons ',extension ,name)))
