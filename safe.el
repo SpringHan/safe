@@ -37,11 +37,11 @@
 (defun safe-buffer-get-buffers (input)
   "Get the buffers."
   (let* ((buffers (buffer-list))
+         (invisible-buffers '("*Safe*" "*Safe Result*" "*eaf*"))
          visible-buffers)
     (mapc #'(lambda (b)
               (setq b (buffer-name b))
-              (unless (or (string= b "*Safe*")
-                          (string= b "*Safe Result*")
+              (unless (or (safe--get-index b invisible-buffers)
                           (string= (substring b 0 1) " "))
                 (add-to-list 'visible-buffers b)))
           buffers)
