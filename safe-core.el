@@ -30,12 +30,24 @@
 
 ;;; Code:
 
+(require 'all-the-icons)
+
 (defgroup safe nil
   "The group for `safe'."
   :group 'applications)
 
 (defcustom safe-extension-alist nil
   "The extensions alist."
+  :type 'list
+  :group 'safe)
+
+(defcustom safe-autoload-extension-alist nil
+  "The autoload extensions."
+  :type 'list
+  :group 'safe)
+
+(defcustom safe-icon-alist nil
+  "The icon alist."
   :type 'list
   :group 'safe)
 
@@ -55,6 +67,11 @@
 
 (defcustom safe-previous-directory nil
   "Buffer before starting safe."
+  :type 'string
+  :group 'safe)
+
+(defcustom safe-last-search ""
+  "Last search content."
   :type 'string
   :group 'safe)
 
@@ -83,6 +100,15 @@
   :type 'list
   :group 'safe)
 
+(defcustom safe-update-result nil
+  "If need to update result."
+  :type 'boolean
+  :group 'safe)
+
+(defcustom safe-current-item-overlay nil
+  "The overlay for current item."
+  :group 'safe)
+
 (defconst safe-buffer "*Safe*"
   "Safe buffer.")
 
@@ -107,7 +133,7 @@
     (define-key map (kbd "M-b") 'safe-previous-extension)
     (define-key map (kbd "M-f") 'safe-next-extension)
     (define-key map (kbd "RET") 'safe-return)
-    (define-key map (kbd "DEL") 'safe-delete)
+    ;; (define-key map (kbd "DEL") 'safe-delete)
     map)
   "The safe mode map.")
 
@@ -163,25 +189,47 @@
 
 (defun safe-search ()
   "Search for the results."
-  (let ((extensions (if safe-current-extension
+  (let ((input (safe--get-input))
+        (extensions (if safe-current-extension
                         safe-current-extension
-                      safe-extension-alist))
-        (input (with-current-buffer safe-buffer
-                 (substring (buffer-string) safe-current-input-point))))
-    (if (symbolp extensions)
-        (funcall extensions input)
-      (mapc #'(lambda (e)
-                (funcall (car e) input))
-            extensions))
-    ))
+                      safe-extension-alist)))
+    (when extensions
+      (if (symbolp extensions)
+          (funcall extensions input)
+        (dolist (extension extensions)
+          (funcall (car extension) input))
+        ))
+    (safe-update-result-buffer)))
 
 (defun safe-update-result (name value)
   "Update the VALUE of extension NAME."
-  )
+  (let* ((result-index (safe--get-index name safe-result-list t))
+        (result-name (car (nth result-index safe-result-list))))
+    (setf (cdr (nth result-index safe-result-list)) value)
+    (setq safe-update-result t)))
 
-(defun safe-update-content-buffer ()
+(defun safe-update-result-buffer ()
   "Update content buffer."
-  )
+  (when safe-update-result
+    (with-current-buffer safe-result-buffer
+      (erase-buffer)
+
+      (setq safe-current-item-overlay (make-overlay (point) (point) (current-buffer) t))
+      (overlay-put safe-current-item-overlay 'face '((t)))
+
+      (dolist (result safe-result-list)
+        (when (or (null safe-current-extension)
+                  (safe-current-extension-p (car result) safe-extension-alist)
+                  (safe-current-extension-p (car result) safe-autoload-extension-alist))
+          (insert "" (propertize (car result) 'face '(:foreground "#cc7700")) "\n")
+          (mapc #'(lambda (r)
+                    (insert (format "\t%s\t%s\n"
+                                    (safe--get-icon (car result) r)
+                                    (propertize r 'face '(:height 180)))
+                            ))
+                (cdr result)))
+        (insert "\n")))
+    (setq safe-update-result nil)))
 
 (defun safe-select-input-window ()
   "Select the input window."
@@ -206,7 +254,13 @@
   (with-current-buffer safe-result-buffer
     (erase-buffer)
     (buffer-face-set 'safe-result-face)
-    (safe-close-settings t)))
+    (safe-close-settings t)
+    (setq-local tab-width 1)))
+
+(defun safe-enter ()
+  "Enter action."
+  (interactive)
+  ())
 
 (defun safe-close ()
   "Close and kill the safe."
@@ -221,6 +275,7 @@
         safe-previous-directory nil
         safe-current-item nil
         safe-current-extension nil
+        safe-current-input-point 0
         safe-run-timer nil))
 
 (defun safe-close-settings (&optional none-cursor)
@@ -257,37 +312,119 @@
         prefix-function)
     (when prefix
       (mapc #'(lambda (p)
-                (when (equal prefix (cdr p))
-                  (setq prefix-function (car p))))
+                (when (string= prefix (car p))
+                  (setq prefix-function (cdr p))))
             safe-prefix-alist))
     prefix-function))
 
+(defun safe--get-index (item seq &optional cons value)
+  "Get the earliest index of ITEM in SEQ.
+If CONS is t, it'll get the earliest cons' index."
+  (let ((index nil)
+        (indexf 0))
+    (dolist (ele seq)
+      (if (equal item (if cons
+                          (car ele)
+                        ele))
+          (setq index indexf)
+        (setq indexf (+ 1 indexf))))
+    (if value
+        (nth index seq)
+      index)))
+
+(defun safe-current-extension-p (name list)
+  "Check if the NAME of extension is the current extension."
+  (when safe-current-extension
+    (let ((result
+           (string= name
+                    (cdr (safe--get-index safe-current-extension
+                                          list
+                                          t
+                                          t)))))
+      result)))
+
+(defun safe--get-icon (name result)
+  "Get the NAME's icon."
+  (let (icon)
+    (mapc #'(lambda (i)
+              (when (equal name (car i))
+                (setq icon (funcall (cdr i) result))))
+          safe-icon-alist)
+    (if icon
+        icon
+      "")))
+
+(defun safe--get-input ()
+  "Get input."
+  (let* ((input (with-current-buffer safe-buffer
+                  (substring (buffer-string) safe-current-input-point)))
+         (prefix (safe--get-prefix input)))
+    (when (and prefix (= safe-current-input-point 0))
+      (setq safe-current-input-point 1
+            safe-current-extension prefix
+            input (substring input 1)
+            safe-update-result t))
+    (when (and (string= input "") (/= safe-current-input-point 0))
+      (setq safe-current-input-point 0
+            safe-current-extension nil
+            safe-update-result t))
+    input))
+
+(defun safe-result-exists-p (result)
+  "Check if RESULT is exists."
+  (let (re)
+    (mapc #'(lambda (r)
+              (when (string= result (car r))
+                (setq re t)))
+          safe-result-list)
+    re))
+
 (defun safe-match-p (input string)
   "If the STRING is fuzzyly matched by INPUT, return non-nil."
-  (string-match-p (regexp-quote input) string))
+  (if (string= input "")
+      t
+    (string-match-p (regexp-quote input) string)))
 
-(defmacro safe-define-extension (extension name &optional doc &key prefix get enter &rest others)
+(defmacro safe-define-extension (extension name &rest body)
   "The macro to define extension.
+
+Keywords:
 
 `prefix': The prefix for quickly change to the extension.
 
 `get': A lambda function, you can use it to
 
-\(fn EXTENSION NAME [DOCSTRING] [ARGS..])"
+\(fn EXTENSION NAME [DOCSTRING] [ARGS..] &rest OTHERS)"
   (declare (indent 2))
-  `(progn
-     ,@others
-     (defun ,extension (&optional get enter)
-       ,(when doc doc)
-       (when get
-         (funcall 'safe-update-result
-                  ,name
-                  (funcall ',get get)))
-       (when enter
-         (funcall ',enter enter)))
-     (when ,prefix
-       (add-to-list 'safe-prefix-alist '(,prefix . ,extension)))
-     (add-to-list 'safe-extension-alist '(,extension . ,name))))
+  (let (doc prefix get enter auto icon)
+    (when (stringp (car-safe body))
+      (setq doc (pop body)))
+    (while (keywordp (car-safe body))
+      (pcase (pop body)
+        (:prefix (setq prefix (pop body)))
+        (:get (setq get (pop body)))
+        (:enter (setq enter (pop body)))
+        (:icon (setq icon (pop body)))
+        (:auto (setq auto (pop body)))))
+    `(progn
+       ,@body
+       (defun ,extension (&optional get enter)
+         ,(when doc doc)
+         (when get
+           (funcall 'safe-update-result
+                    ,name
+                    (funcall ',get get)))
+         (when enter
+           (funcall ',enter enter)))
+       (when ,prefix
+         (add-to-list 'safe-prefix-alist (cons ,prefix ',extension)))
+       (unless (safe-result-exists-p ,name)
+         (add-to-list 'safe-result-list (list ,name "null") t))
+       (if ,auto
+           (add-to-list 'safe-autoload-extension-alist (cons ',extension ,name))
+         (add-to-list 'safe-extension-alist (cons ',extension ,name)))
+       (when ',icon
+         (add-to-list 'safe-icon-alist (cons ,name ',icon))))))
 
 (provide 'safe-core)
 

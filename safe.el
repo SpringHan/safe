@@ -32,6 +32,72 @@
 
 (require 'safe-core)
 
+;;; Basic Extensions
+
+(defun safe-buffer-get-buffers (input)
+  "Get the buffers."
+  (let* ((buffers (buffer-list))
+         visible-buffers)
+    (mapc #'(lambda (b)
+              (setq b (buffer-name b))
+              (unless (or (string= b "*Safe*")
+                          (string= b "*Safe Result*")
+                          (string= (substring b 0 1) " "))
+                (add-to-list 'visible-buffers b)))
+          buffers)
+    (setq buffers '())
+    (dolist (buffer visible-buffers)
+      (when (safe-match-p input buffer)
+        (add-to-list 'buffers buffer)))
+    buffers))
+
+(defun safe-buffer-icon (buffer)
+  "The buffer's icon."
+  (with-current-buffer buffer
+    (if (eq major-mode 'eaf-mode)
+        (all-the-icons-faicon "html5" :height 180)
+      (all-the-icons-icon-for-buffer))))
+
+(safe-define-extension safe-buffer-switch "BUFFER"
+  "The buffer extension for safe."
+  :prefix "#"
+  :get safe-buffer-get-buffers
+  :enter
+  (lambda (e)
+    (safe-close)
+    (switch-to-buffer e))
+  :icon safe-buffer-icon)
+
+;;; Imenu
+(require 'imenu)
+
+(safe-define-extension safe-imenu "IMENU"
+  "The imenu extension for safe."
+  :prefix "@"
+  :get
+  (lambda (g)
+    (ignore-errors
+      (let ((imenu-results (with-current-buffer safe-previous-buffer
+                             (imenu--make-index-alist t)))
+            result)
+        (setq imenu-results (delete '("*Rescan*" . -99) imenu-results))
+        (mapc #'(lambda (i)
+                  (when (safe-match-p g (car i))
+                    (add-to-list 'result (car i))))
+              imenu-results)
+        result)))
+  :enter
+  (lambda (e)
+    (safe-close)
+    (imenu e)))
+
+;; (safe-define-extension safe-command "COMMAND"
+;;   "The command extension for safe."
+;;   :prefix ">"
+;;   :get
+;;   (lambda (g)
+;;     (let ((commands)))))
+
 (provide 'safe)
 
 ;;; safe.el ends here
