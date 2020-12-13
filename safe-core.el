@@ -227,8 +227,8 @@
                     (insert (format "\t%s\t%s\n"
                                     (safe--get-icon (car result) r)
                                     (propertize r 'face '(:height 180)))))
-                (cdr result)))
-        (insert "\n")))
+                (cdr result))
+          (insert "\n"))))
     (setq safe-update-result nil)))
 
 (defun safe-select-input-window ()
@@ -259,8 +259,7 @@
 
 (defun safe-enter ()
   "Enter action."
-  (interactive)
-  ())
+  (interactive))
 
 (defun safe-close ()
   "Close and kill the safe."
@@ -322,15 +321,17 @@
 If CONS is t, it'll get the earliest cons' index."
   (let ((index nil)
         (indexf 0))
-    (dolist (ele seq)
-      (if (equal item (if cons
-                          (car ele)
-                        ele))
-          (setq index indexf)
-        (setq indexf (+ 1 indexf))))
-    (if value
-        (nth index seq)
-      index)))
+    (if (null seq)
+        nil
+      (dolist (ele seq)
+        (if (equal item (if cons
+                            (car ele)
+                          ele))
+            (setq index indexf)
+          (setq indexf (+ 1 indexf))))
+      (if value
+          (nth index seq)
+        index))))
 
 (defun safe-current-extension-p (name list)
   "Check if the NAME of extension is the current extension."

@@ -55,7 +55,7 @@
   "The buffer's icon."
   (with-current-buffer buffer
     (if (eq major-mode 'eaf-mode)
-        (all-the-icons-faicon "html5" :height 180)
+        (all-the-icons-faicon "html5" :v-adjust 0.01)
       (all-the-icons-icon-for-buffer))))
 
 (safe-define-extension safe-buffer-switch "BUFFER"
