@@ -31,6 +31,7 @@
 ;;; Code:
 
 (require 'safe-core)
+(require 'all-the-icons)
 
 ;;; Basic Extensions
 

@@ -30,8 +30,6 @@
 
 ;;; Code:
 
-(require 'all-the-icons)
-
 (defgroup safe nil
   "The group for `safe'."
   :group 'applications)
@@ -54,6 +52,11 @@
 (defcustom safe-prefix-alist nil
   "The prefix list."
   :type 'list
+  :group 'safe)
+
+(defcustom safe-cursor-type 'bar
+  "The cursor type."
+  :type 'symbol
   :group 'safe)
 
 (defcustom safe-run-timer nil
@@ -90,11 +93,6 @@
   :type 'number
   :group 'safe)
 
-(defcustom safe-update-content nil
-  "If need to update the contents."
-  :type 'boolean
-  :group 'safe)
-
 (defcustom safe-result-list nil
   "Result list."
   :type 'list
@@ -105,8 +103,13 @@
   :type 'boolean
   :group 'safe)
 
-(defcustom safe-current-item-overlay nil
+(defcustom safe-select-item-overlay nil
   "The overlay for current item."
+  :group 'safe)
+
+(defcustom safe-select-extension nil
+  "The selected extension."
+  :type 'string
   :group 'safe)
 
 (defconst safe-buffer "*Safe*"
@@ -133,6 +136,7 @@
     (define-key map (kbd "M-b") 'safe-previous-extension)
     (define-key map (kbd "M-f") 'safe-next-extension)
     (define-key map (kbd "RET") 'safe-return)
+    (define-key map (kbd "ESC ESC ESC") 'safe-close)
     ;; (define-key map (kbd "DEL") 'safe-delete)
     map)
   "The safe mode map.")
@@ -148,6 +152,8 @@
   :abbrev-table nil
   :group 'safe
   (kill-all-local-variables)
+  (setq-local major-mode 'safe-mode
+              mode-name "Safe")
   (use-local-map safe-mode-map)
 
   ;; Close some modes
@@ -203,8 +209,7 @@
 
 (defun safe-update-result (name value)
   "Update the VALUE of extension NAME."
-  (let* ((result-index (safe--get-index name safe-result-list t))
-        (result-name (car (nth result-index safe-result-list))))
+  (let* ((result-index (safe--get-index name safe-result-list 'car)))
     (setf (cdr (nth result-index safe-result-list)) value)
     (setq safe-update-result t)))
 
@@ -214,22 +219,73 @@
     (with-current-buffer safe-result-buffer
       (erase-buffer)
 
-      (setq safe-current-item-overlay (make-overlay (point) (point) (current-buffer) t))
-      (overlay-put safe-current-item-overlay 'face '((t)))
+      (setq safe-select-item-overlay (make-overlay (point) (point) (current-buffer) t))
+      (overlay-put safe-select-item-overlay 'display "")
 
       (dolist (result safe-result-list)
         (when (and (not (safe--result-empty-p (cdr result)))
                    (or (null safe-current-extension)
                        (safe-current-extension-p (car result) safe-extension-alist)
                        (safe-current-extension-p (car result) safe-autoload-extension-alist)))
-          (insert (propertize (car result) 'face '(:foreground "#CC7700")) "\n")
+          (unless safe-current-extension
+            (insert (propertize (car result) 'face '(:foreground "#CC7700")) "\n"))
           (mapc #'(lambda (r)
                     (insert (format "\t%s\t%s\n"
                                     (safe--get-icon (car result) r)
                                     (propertize r 'face '(:height 180)))))
                 (cdr result))
-          (insert "\n"))))
+          (insert "\n")))
+      ;; (safe-update-select-item)
+      )
     (setq safe-update-result nil)))
+
+(defun safe-update-select-item ()       ;<TODO(SpringHan)> The function has some bugs [Sun Dec 20 00:39:14 2020]
+  "Update the select item."
+  (when safe-select-item-overlay
+    (let ((line (safe--get-select-item (line-number-at-pos))))
+      (goto-line line)
+      (move-overlay safe-select-item-overlay
+                    (point-at-bol)
+                    (point-at-eol)))
+    (set-window-point (get-buffer-window safe-result-buffer) (point))))
+
+;; <TODO(SpringHan)> Move these functions about item to the bottom [Sat Dec 19 23:29:39 2020]
+(defun safe--get-select-item (line)
+  "Get the select item with LINE."
+  (if safe-current-extension
+      (if safe-update-result
+          1
+        line)
+    (let ((extension-line (safe--get-extension-line safe-select-extension)))
+      (if (null extension-line)
+          (progn
+            (goto-line 1)
+            (setq safe-select-extension (buffer-substring-no-properties
+                                         (point-at-bol) (point-at-eol))
+                  line 2)
+            line)
+        (if safe-update-result
+            (setq line extension-line)
+          (when (> line extension-line)
+            line))))))
+
+(defun safe--result-line-exists-p (line)
+  "Check if the LINE of result buffer is exists."
+  (let ((content (buffer-substring-no-properties
+                  (point-at-bol line) (point-at-eol line))))
+    (if (string= content "\n")
+        (progn (previous-line)
+               (setq line (1- line)))
+      line)))
+
+(defun safe--get-extension-line (name)
+  "Get the line which has extension NAME."
+  (when name
+    (let ((buffer-contents (split-string (buffer-string) "\n" t)))
+      (catch 'line
+        (dolist (line buffer-contents)
+          (when (string= line name)
+            (throw 'line line)))))))
 
 (defun safe-select-input-window ()
   "Select the input window."
@@ -238,12 +294,12 @@
 (defun safe-input-buffer-init ()
   "Initialize the buffer."
   (switch-to-buffer safe-buffer)
-  (safe-mode)
   (with-current-buffer safe-buffer
     (erase-buffer)
+    (safe-mode)
     (buffer-face-set 'safe-input-face)
     (when (featurep 'evil)
-      (evil-change-state 'insert))
+      (evil-change-state 'emacs))
     (safe-close-settings)))
 
 (defun safe-result-buffer-init ()
@@ -264,6 +320,10 @@
 (defun safe-close ()
   "Close and kill the safe."
   (interactive)
+  (let ((auto-name (safe--get-index safe-current-extension
+                                safe-autoload-extension-alist
+                                'car 'cdr)))
+    (safe--result auto-name 'delete))
   (when (get-buffer safe-buffer)
     (tab-bar-close-tab)
     (kill-buffer safe-buffer)
@@ -285,7 +345,7 @@
     (setq-local tab-line-format nil))
   (setq-local mode-line-format nil
               header-line-format nil)
-  (when none-cursor
+  (if none-cursor
     (setq-local cursor-type nil)))
 
 (defun safe--float-to-int (float)
@@ -316,7 +376,7 @@
             safe-prefix-alist))
     prefix-function))
 
-(defun safe--get-index (item seq &optional cons value)
+(defun safe--get-index (item seq &optional action value)
   "Get the earliest index of ITEM in SEQ.
 If CONS is t, it'll get the earliest cons' index."
   (let ((index nil)
@@ -324,24 +384,25 @@ If CONS is t, it'll get the earliest cons' index."
     (if (null seq)
         nil
       (dolist (ele seq)
-        (if (equal item (if cons
-                            (car ele)
+        (if (equal item (if action
+                            (ignore-errors (funcall action ele))
                           ele))
             (setq index indexf)
-          (setq indexf (+ 1 indexf))))
-      (if value
-          (nth index seq)
-        index))))
+          (setq indexf (1+ indexf))))
+      (when index
+        (cond ((eq value t) (nth index seq))
+              ((eq value nil) index)
+              (t (funcall value (nth index seq))))))))
 
 (defun safe-current-extension-p (name list)
   "Check if the NAME of extension is the current extension."
   (when safe-current-extension
     (let ((result
            (string= name
-                    (cdr (safe--get-index safe-current-extension
-                                          list
-                                          t
-                                          t)))))
+                    (safe--get-index safe-current-extension
+                                     list
+                                     'car
+                                     'cdr))))
       result)))
 
 (defun safe--get-icon (name result)
@@ -360,14 +421,13 @@ If CONS is t, it'll get the earliest cons' index."
   (let* ((input (with-current-buffer safe-buffer
                   (substring (buffer-string) safe-current-input-point)))
          (prefix (safe--get-prefix input)))
-    (when (and prefix (= safe-current-input-point 0))
-      (setq safe-current-input-point 1
-            safe-current-extension prefix
-            input (substring input 1)
-            safe-update-result t))
-    (when (and (string= input "") (/= safe-current-input-point 0))
-      (setq safe-current-input-point 0
-            safe-current-extension nil
+    (when prefix
+      (setq input (substring input 1))
+      (when (null safe-current-extension)
+        (setq safe-current-extension prefix
+              safe-update-result t)))
+    (when (and (not (null safe-current-extension)) (null prefix))
+      (setq safe-current-extension nil
             safe-update-result t))
     input))
 
@@ -386,11 +446,62 @@ If CONS is t, it'll get the earliest cons' index."
           safe-result-list)
     re))
 
+(defun safe--result (name action)
+  "Do the ACTION  with NAME."
+  (let ((result (safe--get-index name safe-result-list 'car t)))
+    (cond ((and result (eq action 'delete))
+           (setq safe-result-list (delete result safe-result-list)))
+          ((and (null result) (eq action 'add))
+           (setq safe-result-list (append safe-result-list (list (list name))))))))
+
+;;; Functions for User
+
+(defun safe-delete-extension (extension &optional alist)
+  "Delete EXTENSION in `safe-extension-alist' or ALIST."
+  (let ((name (safe--get-index extension (if alist
+                                             (symbol-value alist)
+                                           safe-extension-alist)
+                               'car 'cdr)))
+    (unless alist
+      (setq alist 'safe-extension-alist))
+    (if (null name)
+        (message "%S is not included by %S!" extension alist)
+      (set alist (eval (delete (cons extension name) (symbol-value alist)))))))
+
+(defun safe-move-extension (extension from to)
+  "Move EXTENSION from FROM to TO."
+  (let ((name (safe--get-index extension (symbol-value from) 'car 'cdr)))
+    (if (null name)
+        (message "%S is not included by %S!" extension from)
+      (safe-delete-extension extension from)
+      (add-to-list to (cons extension name) t)
+      (safe--result name (if (eq to 'safe-extension-alist)
+                             'add
+                           'delete)))))
+
 (defun safe-match-p (input string)
   "If the STRING is fuzzyly matched by INPUT, return non-nil."
   (if (string= input "")
       t
     (string-match-p (regexp-quote input) string)))
+
+(defmacro eval-or (s-ex var o1 o2)
+  "Eval the O1 and O2 with S-EX, replace the VAR in S-EX with o1 and o2.
+Return the value which is non-nil.
+If the two results are all nil, return nil."
+  (declare (indent 1))
+  (let ((o-index (safe--get-index `,var `,s-ex)))
+    (if (null o-index)
+        (error "eval-or: s-ex need var!")
+      `(let ((s ',s-ex)
+             result)
+         (setf (nth ,o-index s) ',o1
+               result (ignore-errors (eval s)))
+         (if result
+             result
+           (setf (nth ,o-index s) ',o2
+                 result (ignore-errors (eval s)))
+           result)))))
 
 (defmacro safe-define-extension (extension name &rest body)
   "The macro to define extension.
