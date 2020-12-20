@@ -178,9 +178,9 @@
 
     ;; Start searching...
     (safe-search-init (if object
-                     object
-                   "")
-                 (when search-type search-type))))
+                          object
+                        "")
+                      (when search-type search-type))))
 
 (defun safe-search-init (input &optional extension)
   "Prepare for the search."
@@ -203,9 +203,8 @@
       (if (symbolp extensions)
           (funcall extensions input)
         (dolist (extension extensions)
-          (funcall (car extension) input))
-        ))
-    (safe-update-result-buffer)))
+          (funcall (car extension) input)))
+      (safe-update-result-buffer))))
 
 (defun safe-update-result (name value)
   "Update the VALUE of extension NAME."
@@ -235,15 +234,14 @@
                                     (propertize r 'face '(:height 180)))))
                 (cdr result))
           (insert "\n")))
-      ;; (safe-update-select-item)
-      )
+      (safe-update-select-item))
     (setq safe-update-result nil)))
 
 (defun safe-update-select-item ()       ;<TODO(SpringHan)> The function has some bugs [Sun Dec 20 00:39:14 2020]
   "Update the select item."
   (when safe-select-item-overlay
     (let ((line (safe--get-select-item (line-number-at-pos))))
-      (goto-line line)
+      (goto-line line)                  ;<TODO(SpringHan)> Maybe it'll be replaced to goto-char [Sun Dec 20 09:17:32 2020]
       (move-overlay safe-select-item-overlay
                     (point-at-bol)
                     (point-at-eol)))
@@ -252,22 +250,24 @@
 ;; <TODO(SpringHan)> Move these functions about item to the bottom [Sat Dec 19 23:29:39 2020]
 (defun safe--get-select-item (line)
   "Get the select item with LINE."
-  (if safe-current-extension
-      (if safe-update-result
-          1
-        line)
-    (let ((extension-line (safe--get-extension-line safe-select-extension)))
-      (if (null extension-line)
-          (progn
-            (goto-line 1)
-            (setq safe-select-extension (buffer-substring-no-properties
-                                         (point-at-bol) (point-at-eol))
-                  line 2)
-            line)
-        (if safe-update-result
-            (setq line extension-line)
-          (when (> line extension-line)
-            line))))))
+  (interactive "dEnter the var: ")
+  (with-current-buffer safe-result-buffer
+    (if safe-current-extension
+       (if safe-update-result
+           1
+         line)
+     (let ((extension-line (safe--get-extension-line safe-select-extension)))
+       (if (null extension-line)
+           (progn
+             (goto-line 1)
+             (setq safe-select-extension (buffer-substring-no-properties
+                                          (point-at-bol) (point-at-eol))
+                   line 2)
+             line)
+         (if safe-update-result
+             (setq line extension-line)
+           (when (> line extension-line)
+             line)))))))
 
 (defun safe--result-line-exists-p (line)
   "Check if the LINE of result buffer is exists."
@@ -281,11 +281,13 @@
 (defun safe--get-extension-line (name)
   "Get the line which has extension NAME."
   (when name
-    (let ((buffer-contents (split-string (buffer-string) "\n" t)))
+    (let ((buffer-contents (split-string (buffer-string) "\n" t))
+          (line-num 0))
       (catch 'line
         (dolist (line buffer-contents)
-          (when (string= line name)
-            (throw 'line line)))))))
+          (if (string= line name)
+              (throw 'line line-num)
+            (setq line-num (1+ line-num))))))))
 
 (defun safe-select-input-window ()
   "Select the input window."
@@ -335,6 +337,8 @@
         safe-current-item nil
         safe-current-extension nil
         safe-current-input-point 0
+        safe-select-item-overlay nil
+        safe-select-extension nil
         safe-run-timer nil))
 
 (defun safe-close-settings (&optional none-cursor)
