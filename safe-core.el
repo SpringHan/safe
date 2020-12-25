@@ -73,7 +73,7 @@
   :type 'string
   :group 'safe)
 
-(defcustom safe-last-search ""
+(defcustom safe-last-search nil
   "Last search content."
   :type 'string
   :group 'safe)
@@ -128,6 +128,15 @@
   "The face for result."
   :group 'safe)
 
+(defface safe-extension-title-face
+  '((t (:foreground "#CC7700")))
+  "The face for extension's title."
+  :group 'safe)
+
+(defface safe-select-item-face
+  '((t (:background "grey48")))
+  "The face for select item.")
+
 (defvar safe-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-g") 'safe-close)
@@ -137,7 +146,7 @@
     (define-key map (kbd "M-f") 'safe-next-extension)
     (define-key map (kbd "RET") 'safe-return)
     (define-key map (kbd "ESC ESC ESC") 'safe-close)
-    ;; (define-key map (kbd "DEL") 'safe-delete)
+    (define-key map (kbd "DEL") 'safe-delete)
     map)
   "The safe mode map.")
 
@@ -199,7 +208,7 @@
         (extensions (if safe-current-extension
                         safe-current-extension
                       safe-extension-alist)))
-    (when extensions
+    (when (and (stringp input) extensions)
       (if (symbolp extensions)
           (funcall extensions input)
         (dolist (extension extensions)
@@ -219,7 +228,7 @@
       (erase-buffer)
 
       (setq safe-select-item-overlay (make-overlay (point) (point) (current-buffer) t))
-      (overlay-put safe-select-item-overlay 'display "")
+      (overlay-put safe-select-item-overlay 'face 'safe-select-item-face)
 
       (dolist (result safe-result-list)
         (when (and (not (safe--result-empty-p (cdr result)))
@@ -227,7 +236,7 @@
                        (safe-current-extension-p (car result) safe-extension-alist)
                        (safe-current-extension-p (car result) safe-autoload-extension-alist)))
           (unless safe-current-extension
-            (insert (propertize (car result) 'face '(:foreground "#CC7700")) "\n"))
+            (insert (propertize (car result) 'face 'safe-extension-title-face) "\n"))
           (mapc #'(lambda (r)
                     (insert (format "\t%s\t%s\n"
                                     (safe--get-icon (car result) r)
@@ -242,15 +251,67 @@
   (when safe-select-item-overlay
     (let ((line (safe--get-select-item (line-number-at-pos))))
       (goto-line line)                  ;<TODO(SpringHan)> Maybe it'll be replaced to goto-char [Sun Dec 20 09:17:32 2020]
-      (move-overlay safe-select-item-overlay
-                    (point-at-bol)
-                    (point-at-eol)))
-    (set-window-point (get-buffer-window safe-result-buffer) (point))))
+      (message "Test: %S" line)
+      (safe-select-item-update))))
+
+(defun safe-select-item-update ()
+  "Update the select item's overlay."
+  (move-overlay safe-select-item-overlay
+                (point-at-bol)
+                (point-at-eol))
+  (set-window-point (get-buffer-window safe-result-buffer) (point)))
+
+(defun safe-previous-item ()
+  "Move to previous item."
+  (interactive)
+  (with-current-buffer safe-result-buffer
+    (goto-char (overlay-start safe-select-item-overlay))
+    (previous-line)
+    (while (and (not (bobp))
+                (or (safe--empty-line-p)
+                    (safe--extension-title-p
+                     (buffer-substring-no-properties (point-at-bol)
+                                                     (point-at-eol)))))
+      (previous-line))
+    (safe-select-item-update)))
+
+(defun safe-next-item ()
+  "Move to previous item."
+  (interactive)
+  (with-current-buffer safe-result-buffer
+    (goto-char (overlay-start safe-select-item-overlay))
+    (forward-line)
+    (while (and (not (eobp))
+                (or (safe--empty-line-p)
+                    (safe--extension-title-p
+                     (buffer-substring-no-properties (point-at-bol)
+                                                     (point-at-eol)))))
+      (forward-line))
+    (safe-select-item-update)))
+
+(defun safe-return ()
+  "Return event."
+  (interactive)
+  (with-current-buffer safe-result-buffer
+    (let* ((select-item (buffer-substring-no-properties
+                         (overlay-start safe-select-item-overlay)
+                         (overlay-end safe-select-item-overlay)))
+           (input (if (string= select-item "")
+                      (safe--get-input)
+                    (substring select-item
+                               (if (string= (substring select-item 1 2) "\t")
+                                   2
+                                 3)))))
+      (funcall (if safe-current-extension
+                   safe-current-extension
+                 (eval-or (safe--get-index safe-select-extension
+                                           var 'cdr 'car)
+                   var safe-extension-alist safe-autoload-extension-alist))
+               nil input))))
 
 ;; <TODO(SpringHan)> Move these functions about item to the bottom [Sat Dec 19 23:29:39 2020]
 (defun safe--get-select-item (line)
   "Get the select item with LINE."
-  (interactive "dEnter the var: ")
   (with-current-buffer safe-result-buffer
     (if safe-current-extension
        (if safe-update-result
@@ -289,6 +350,16 @@
               (throw 'line line-num)
             (setq line-num (1+ line-num))))))))
 
+(defun safe--extension-title-p (string)
+  "Check if the STRING is the extension title."
+  (if (not (string= (substring string 0 1) "\t"))
+      t
+    nil))
+
+(defun safe--empty-line-p ()
+  "Check if the current line is empty."
+  (= (point-at-bol) (point-at-eol)))
+
 (defun safe-select-input-window ()
   "Select the input window."
   (select-window (get-buffer-window safe-buffer)))
@@ -300,7 +371,9 @@
     (erase-buffer)
     (safe-mode)
     (buffer-face-set 'safe-input-face)
-    (when (featurep 'evil)
+    (if (not (featurep 'evil))
+        (setq-local cursor-type safe-cursor-type)
+      (setq-local evil-emacs-state-cursor safe-cursor-type)
       (evil-change-state 'emacs))
     (safe-close-settings)))
 
@@ -314,10 +387,6 @@
     (buffer-face-set 'safe-result-face)
     (safe-close-settings t)
     (setq-local tab-width 1)))
-
-(defun safe-enter ()
-  "Enter action."
-  (interactive))
 
 (defun safe-close ()
   "Close and kill the safe."
@@ -339,7 +408,8 @@
         safe-current-input-point 0
         safe-select-item-overlay nil
         safe-select-extension nil
-        safe-run-timer nil))
+        safe-run-timer nil
+        safe-last-search nil))
 
 (defun safe-close-settings (&optional none-cursor)
   "Close some options."
@@ -425,15 +495,18 @@ If CONS is t, it'll get the earliest cons' index."
   (let* ((input (with-current-buffer safe-buffer
                   (substring (buffer-string) safe-current-input-point)))
          (prefix (safe--get-prefix input)))
-    (when prefix
-      (setq input (substring input 1))
-      (when (null safe-current-extension)
-        (setq safe-current-extension prefix
-              safe-update-result t)))
-    (when (and (not (null safe-current-extension)) (null prefix))
-      (setq safe-current-extension nil
-            safe-update-result t))
-    input))
+    (if (and (not (string= input "")) (string= input safe-last-search))
+        (list input nil)
+      (setq safe-last-search input)
+      (when prefix
+        (setq input (substring input 1))
+        (when (null safe-current-extension)
+          (setq safe-current-extension prefix
+                safe-update-result t)))
+      (when (and (not (null safe-current-extension)) (null prefix))
+        (setq safe-current-extension nil
+              safe-update-result t))
+      input)))
 
 (defun safe--result-empty-p (result)
   "Check if the result is empty."
@@ -457,6 +530,27 @@ If CONS is t, it'll get the earliest cons' index."
            (setq safe-result-list (delete result safe-result-list)))
           ((and (null result) (eq action 'add))
            (setq safe-result-list (append safe-result-list (list (list name))))))))
+
+(defun safe--list-match (input string)
+  "Check if the INPUT in the list are all matched by STRING."
+  (let ((input-list (split-string input " " t)))
+    (if (catch 'not-match
+          (dolist (i input-list)
+            (unless (string-match-p (regexp-quote i) string)
+              (throw 'not-match t))))
+        nil
+      t)))
+
+;;; Advice
+
+(advice-add 'push-mark
+            :around
+            (lambda (orig &optional location nomsg activite)
+              "Do not notice Mark Set."
+              (funcall orig location (if (string= (buffer-name (current-buffer)) safe-result-buffer)
+                                         t
+                                       nomsg)
+                       activite)))
 
 ;;; Functions for User
 
@@ -487,7 +581,7 @@ If CONS is t, it'll get the earliest cons' index."
   "If the STRING is fuzzyly matched by INPUT, return non-nil."
   (if (string= input "")
       t
-    (string-match-p (regexp-quote input) string)))
+    (safe--list-match input string)))
 
 (defmacro eval-or (s-ex var o1 o2)
   "Eval the O1 and O2 with S-EX, replace the VAR in S-EX with o1 and o2.
