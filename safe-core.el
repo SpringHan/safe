@@ -198,6 +198,7 @@
         (setq safe-current-extension extension))
     (let ((prefix (safe--get-prefix input)))
       (when prefix
+        (safe--set-input (substring input 0 1))
         (setq safe-current-extension prefix))))
   (setq safe-run-timer (run-with-timer 0 0.1
                                        'safe-search)))
@@ -308,6 +309,12 @@
                                            var 'cdr 'car)
                    var safe-extension-alist safe-autoload-extension-alist))
                nil input))))
+
+(defun safe-delete ()
+  "Delete event."
+  (interactive)
+  (if (null safe-current-extension)
+      (delete-backward-char 1)))
 
 ;; <TODO(SpringHan)> Move these functions about item to the bottom [Sat Dec 19 23:29:39 2020]
 (defun safe--get-select-item (line)
@@ -431,11 +438,14 @@
 
 (defun safe--extension-exists-p (extension)
   "Check if the extension is exists."
-  (let (result)
-    (mapc #'(lambda (e)
-              (when (equal (car e) extension)
-                (setq result t))))
-    result))
+  (eval-or (safe--get-index extension var 'car)
+    var safe-extension-alist safe-autoload-extension-alist))
+
+(defun safe--set-input (input)
+  "Set the input."
+  (with-current-buffer safe-buffer
+    (erase-buffer)
+    (insert input)))
 
 (defun safe--get-prefix (string)
   "Get the prefix. If STRING has prefix, return it. Otherwise return nil."

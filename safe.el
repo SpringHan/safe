@@ -69,6 +69,16 @@
     (switch-to-buffer e))
   :icon safe-buffer-icon)
 
+(safe-define-extension safe-buffer-kill "KILL-BUFFER"
+  "Kill buffer extension for safe."
+  :auto t
+  :get safe-buffer-get-buffers
+  :enter
+  (lambda (e)
+    (safe-close)
+    (kill-buffer e))
+  :icon safe-buffer-icon)
+
 ;;; Imenu
 (require 'imenu)
 
