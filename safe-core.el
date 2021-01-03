@@ -313,8 +313,13 @@
 (defun safe-delete ()
   "Delete event."
   (interactive)
-  (if (null safe-current-extension)
-      (delete-backward-char 1)))
+  (if (and (not (null safe-current-extension))
+           (string= (with-current-buffer safe-buffer
+                      (buffer-string))
+                    ""))
+      (setq safe-current-extension nil
+            safe-result-buffer t)
+    (delete-backward-char 1)))
 
 ;; <TODO(SpringHan)> Move these functions about item to the bottom [Sat Dec 19 23:29:39 2020]
 (defun safe--get-select-item (line)
@@ -556,7 +561,7 @@ If CONS is t, it'll get the earliest cons' index."
 (advice-add 'push-mark
             :around
             (lambda (orig &optional location nomsg activite)
-              "Do not notice Mark Set."
+              "Do not notice 'Mark Set' in safe."
               (funcall orig location (if (string= (buffer-name (current-buffer)) safe-result-buffer)
                                          t
                                        nomsg)
