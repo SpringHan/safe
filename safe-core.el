@@ -44,11 +44,6 @@
   :type 'list
   :group 'safe)
 
-(defcustom safe-icon-alist nil
-  "The icon alist."
-  :type 'list
-  :group 'safe)
-
 (defcustom safe-prefix-alist nil
   "The prefix list."
   :type 'list
@@ -91,11 +86,6 @@
 (defcustom safe-current-input-point 0
   "The column number for input."
   :type 'number
-  :group 'safe)
-
-(defcustom safe-result-list nil
-  "Result list."
-  :type 'list
   :group 'safe)
 
 (defcustom safe-update-result nil
@@ -145,7 +135,6 @@
     (define-key map (kbd "M-b") 'safe-previous-extension)
     (define-key map (kbd "M-f") 'safe-next-extension)
     (define-key map (kbd "RET") 'safe-return)
-    (define-key map (kbd "ESC ESC ESC") 'safe-close)
     (define-key map (kbd "DEL") 'safe-delete)
     map)
   "The safe mode map.")
@@ -169,204 +158,11 @@
   (when (featurep 'company)
     (company-mode -1)))
 
-(defun safe (&optional search-type object)
-  "The main function for `safe'."
-  (interactive)
-  (if (get-buffer safe-buffer)
-      (safe-close)
-
-    ;; Initialize the buffer
-    (setq safe-previous-buffer (current-buffer)
-          safe-previous-directory default-directory)
-
-    (tab-bar-new-tab)
-    ;; Input buffer init
-    (safe-input-buffer-init)
-    (safe-result-buffer-init)
-    (safe-select-input-window)
-
-    ;; Start searching...
-    (safe-search-init (if object
-                          object
-                        "")
-                      (when search-type search-type))))
-
-(defun safe-search-init (input &optional extension)
-  "Prepare for the search."
-  (if extension
-      (when (safe--extension-exists-p extension)
-        (setq safe-current-extension extension))
-    (let ((prefix (safe--get-prefix input)))
-      (when prefix
-        (safe--set-input (substring input 0 1))
-        (setq safe-current-extension prefix))))
-  (setq safe-run-timer (run-with-timer 0 0.1
-                                       'safe-search)))
-
-(defun safe-search ()
-  "Search for the results."
-  (let ((input (safe--get-input))
-        (extensions (if safe-current-extension
-                        safe-current-extension
-                      safe-extension-alist)))
-    (when (and (stringp input) extensions)
-      (if (symbolp extensions)
-          (funcall extensions input)
-        (dolist (extension extensions)
-          (funcall (car extension) input)))
-      (safe-update-result-buffer))))
-
-(defun safe-update-result (name value)
-  "Update the VALUE of extension NAME."
-  (let* ((result-index (safe--get-index name safe-result-list 'car)))
-    (setf (cdr (nth result-index safe-result-list)) value)
-    (setq safe-update-result t)))
-
-(defun safe-update-result-buffer ()
-  "Update content buffer."
-  (when safe-update-result
-    (with-current-buffer safe-result-buffer
-      (erase-buffer)
-
-      (setq safe-select-item-overlay (make-overlay (point) (point) (current-buffer) t))
-      (overlay-put safe-select-item-overlay 'face 'safe-select-item-face)
-
-      (dolist (result safe-result-list)
-        (when (and (not (safe--result-empty-p (cdr result)))
-                   (or (null safe-current-extension)
-                       (safe-current-extension-p (car result) safe-extension-alist)
-                       (safe-current-extension-p (car result) safe-autoload-extension-alist)))
-          (unless safe-current-extension
-            (insert (propertize (car result) 'face 'safe-extension-title-face) "\n"))
-          (mapc #'(lambda (r)
-                    (insert (format "\t%s\t%s\n"
-                                    (safe--get-icon (car result) r)
-                                    (propertize r 'face '(:height 180)))))
-                (cdr result))
-          (insert "\n")))
-      (safe-update-select-item))
-    (setq safe-update-result nil)))
-
-(defun safe-update-select-item ()       ;<TODO(SpringHan)> The function has some bugs [Sun Dec 20 00:39:14 2020]
-  "Update the select item."
-  (when safe-select-item-overlay
-    (let ((line (safe--get-select-item (line-number-at-pos))))
-      (goto-line line)                  ;<TODO(SpringHan)> Maybe it'll be replaced to goto-char [Sun Dec 20 09:17:32 2020]
-      (message "Test: %S" line)
-      (safe-select-item-update))))
-
-(defun safe-select-item-update ()
-  "Update the select item's overlay."
-  (move-overlay safe-select-item-overlay
-                (point-at-bol)
-                (point-at-eol))
-  (set-window-point (get-buffer-window safe-result-buffer) (point)))
-
-(defun safe-previous-item ()
-  "Move to previous item."
-  (interactive)
-  (with-current-buffer safe-result-buffer
-    (goto-char (overlay-start safe-select-item-overlay))
-    (previous-line)
-    (while (and (not (bobp))
-                (or (safe--empty-line-p)
-                    (safe--extension-title-p
-                     (buffer-substring-no-properties (point-at-bol)
-                                                     (point-at-eol)))))
-      (previous-line))
-    (safe-select-item-update)))
-
-(defun safe-next-item ()
-  "Move to previous item."
-  (interactive)
-  (with-current-buffer safe-result-buffer
-    (goto-char (overlay-start safe-select-item-overlay))
-    (forward-line)
-    (while (and (not (eobp))
-                (or (safe--empty-line-p)
-                    (safe--extension-title-p
-                     (buffer-substring-no-properties (point-at-bol)
-                                                     (point-at-eol)))))
-      (forward-line))
-    (safe-select-item-update)))
-
-(defun safe-return ()
-  "Return event."
-  (interactive)
-  (with-current-buffer safe-result-buffer
-    (let* ((select-item (buffer-substring-no-properties
-                         (overlay-start safe-select-item-overlay)
-                         (overlay-end safe-select-item-overlay)))
-           (input (if (string= select-item "")
-                      (safe--get-input)
-                    (substring select-item
-                               (if (string= (substring select-item 1 2) "\t")
-                                   2
-                                 3)))))
-      (funcall (if safe-current-extension
-                   safe-current-extension
-                 (eval-or (safe--get-index safe-select-extension
-                                           var 'cdr 'car)
-                   var safe-extension-alist safe-autoload-extension-alist))
-               nil input))))
-
-(defun safe-delete ()
-  "Delete event."
-  (interactive)
-  (if (and (not (null safe-current-extension))
-           (string= (with-current-buffer safe-buffer
-                      (buffer-string))
-                    ""))
-      (setq safe-current-extension nil
-            safe-result-buffer t)
-    (delete-backward-char 1)))
-
-;; <TODO(SpringHan)> Move these functions about item to the bottom [Sat Dec 19 23:29:39 2020]
-(defun safe--get-select-item (line)
-  "Get the select item with LINE."
-  (with-current-buffer safe-result-buffer
-    (if safe-current-extension
-       (if safe-update-result
-           1
-         line)
-     (let ((extension-line (safe--get-extension-line safe-select-extension)))
-       (if (null extension-line)
-           (progn
-             (goto-line 1)
-             (setq safe-select-extension (buffer-substring-no-properties
-                                          (point-at-bol) (point-at-eol))
-                   line 2)
-             line)
-         (if safe-update-result
-             (setq line extension-line)
-           (when (> line extension-line)
-             line)))))))
-
-(defun safe--result-line-exists-p (line)
-  "Check if the LINE of result buffer is exists."
-  (let ((content (buffer-substring-no-properties
-                  (point-at-bol line) (point-at-eol line))))
-    (if (string= content "\n")
-        (progn (previous-line)
-               (setq line (1- line)))
-      line)))
-
-(defun safe--get-extension-line (name)
-  "Get the line which has extension NAME."
-  (when name
-    (let ((buffer-contents (split-string (buffer-string) "\n" t))
-          (line-num 0))
-      (catch 'line
-        (dolist (line buffer-contents)
-          (if (string= line name)
-              (throw 'line line-num)
-            (setq line-num (1+ line-num))))))))
+(defun safe (&optional search-type object))
 
 (defun safe--extension-title-p (string)
   "Check if the STRING is the extension title."
-  (if (not (string= (substring string 0 1) "\t"))
-      t
-    nil))
+  (not (string= (substring string 0 1) "\t")))
 
 (defun safe--empty-line-p ()
   "Check if the current line is empty."
@@ -404,8 +200,8 @@
   "Close and kill the safe."
   (interactive)
   (let ((auto-name (safe--get-index safe-current-extension
-                                safe-autoload-extension-alist
-                                'car 'cdr)))
+                                    safe-autoload-extension-alist
+                                    'car 'cdr)))
     (safe--result auto-name 'delete))
   (when (get-buffer safe-buffer)
     (tab-bar-close-tab)
@@ -432,7 +228,7 @@
   (setq-local mode-line-format nil
               header-line-format nil)
   (if none-cursor
-    (setq-local cursor-type nil)))
+      (setq-local cursor-type nil)))
 
 (defun safe--float-to-int (float)
   "Convert the FLOAT to int."
